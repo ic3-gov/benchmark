@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Benchmark — Diagnostic Suite</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+        
+          :root{
+            --bg:#14120F;
+            --panel:#1C1914;
+            --panel-alt:#211D17;
+            --border:#332D22;
+            --border-soft:#2A2519;
+            --text:#F3EEE3;
+            --text-dim:#948C7A;
+            --text-faint:#5E5747;
+            --accent:#FF7A33;
+            --accent-soft:rgba(255,122,51,0.14);
+            --accent-2:#4FD1C5;
+            --good:#7FCE8C;
+            --warn:#E8B450;
+            --bad:#E85C4A;
+          }
+        
+          *{box-sizing:border-box; margin:0; padding:0;}
+        
+          html,body{
+            background:var(--bg);
+            color:var(--text);
+            font-family:'Space Grotesk', sans-serif;
+            -webkit-font-smoothing:antialiased;
+          }
+        
+          body{
+            min-height:100vh;
+            background-image:
+              radial-gradient(circle at 15% 0%, rgba(255,122,51,0.05), transparent 40%),
+              radial-gradient(circle at 85% 100%, rgba(79,209,197,0.04), transparent 45%);
+          }
+        
+          .mono{ font-family:'JetBrains Mono', monospace; }
+        
+          .app{
+            max-width:980px;
+            margin:0 auto;
+            padding:0 20px 60px;
+          }
+        
+          .scope-wrap{
+            max-width:980px;
+            margin:0 auto;
+            padding:0 20px;
+          }
+          .scope{
+            position:relative;
+            height:96px;
+            margin-top:28px;
+            border:1px solid var(--border);
+            border-radius:6px;
+            background:
+              linear-gradient(var(--border-soft) 1px, transparent 1px) 0 0/100% 24px,
+              linear-gradient(90deg, var(--border-soft) 1px, transparent 1px) 0 0/40px 100%,
+              var(--panel);
+            overflow:hidden;
+          }
+          .scope canvas{ display:block; width:100%; height:100%; }
+          .scope-label{
+            position:absolute; top:8px; left:12px;
+            font-size:10px; letter-spacing:.14em; color:var(--text-faint);
+            text-transform:uppercase;
+          }
+          .scope-label b{ color:var(--accent); font-weight:600; }
+          .scope-live{
+            position:absolute; top:8px; right:12px;
+            font-size:10px; letter-spacing:.1em; color:var(--text-faint);
+            display:flex; align-items:center; gap:6px; text-transform:uppercase;
+          }
+          .dot{ width:6px; height:6px; border-radius:50%; background:var(--text-faint); transition:background .2s; }
+          .dot.on{ background:var(--accent); box-shadow:0 0 8px var(--accent); }
+        
+          header{
+            padding-top:36px;
+            display:flex;
+            flex-direction:column;
+            align-items:flex-start;
+            gap:14px;
+          }
+          .eyebrow{
+            font-size:11px; letter-spacing:.22em; color:var(--accent);
+            text-transform:uppercase; font-weight:600;
+            display:flex; align-items:center; gap:10px;
+          }
+          .eyebrow::before{
+            content:''; width:18px; height:1px; background:var(--accent);
+          }
+          h1{
+            font-size:clamp(32px,5vw,48px);
+            font-weight:700;
+            letter-spacing:-0.02em;
+            line-height:1.05;
+          }
+          .sub{
+            max-width:560px;
+            color:var(--text-dim);
+            font-size:15px;
+            line-height:1.55;
+          }
+        
+          .run-row{
+            display:flex; align-items:center; gap:16px;
+            margin-top:6px; flex-wrap:wrap;
+          }
+        
+          button#runBtn{
+            font-family:'Space Grotesk', sans-serif;
+            font-weight:600;
+            font-size:14px;
+            letter-spacing:.04em;
+            color:var(--bg);
+            background:var(--accent);
+            border:none;
+            padding:14px 26px;
+            border-radius:5px;
+            cursor:pointer;
+            transition:transform .12s ease, box-shadow .12s ease, background .2s ease;
+            box-shadow:0 0 0 0 rgba(255,122,51,0);
+          }
+          button#runBtn:hover:not(:disabled){
+            transform:translateY(-1px);
+            box-shadow:0 6px 20px -6px rgba(255,122,51,0.55);
+          }
+          button#runBtn:active:not(:disabled){ transform:translateY(0); }
+          button#runBtn:disabled{
+            background:var(--panel-alt);
+            color:var(--text-faint);
+            cursor:progress;
+            border:1px solid var(--border);
+          }
+          .run-status{
+            font-size:12px; color:var(--text-dim);
+            display:flex; align-items:center; gap:8px;
+          }
+        
+          .tests-grid{
+            margin-top:36px;
+            display:grid;
+            grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));
+            gap:12px;
+          }
+          .test-card{
+            border:1px solid var(--border);
+            background:var(--panel);
+            border-radius:6px;
+            padding:16px;
+            position:relative;
+            overflow:hidden;
+            transition:border-color .25s ease, background .25s ease;
+          }
+          .test-card.active{
+            border-color:var(--accent);
+            background:linear-gradient(180deg, var(--accent-soft), var(--panel) 60%);
+          }
+          .test-card.done{ border-color:var(--border); }
+          .test-head{
+            display:flex; justify-content:space-between; align-items:flex-start;
+            margin-bottom:14px;
+          }
+          .test-num{
+            font-size:11px; color:var(--text-faint);
+          }
+          .test-status{
+            font-size:9px; letter-spacing:.1em; text-transform:uppercase;
+            padding:3px 7px; border-radius:3px;
+            color:var(--text-faint); border:1px solid var(--border-soft);
+          }
+          .test-status.running{ color:var(--accent); border-color:var(--accent); }
+          .test-status.pass{ color:var(--good); border-color:var(--good); }
+          .test-name{
+            font-size:14px; font-weight:600; margin-bottom:2px;
+          }
+          .test-desc{
+            font-size:11.5px; color:var(--text-faint); line-height:1.4; margin-bottom:16px;
+            min-height:30px;
+          }
+          .test-readout{
+            font-size:22px; font-weight:500; color:var(--text);
+            min-height:28px;
+          }
+          .test-readout .unit{
+            font-size:11px; color:var(--text-dim); margin-left:4px;
+          }
+          .test-bar-track{
+            margin-top:10px; height:4px; border-radius:2px;
+            background:var(--border-soft); overflow:hidden;
+          }
+          .test-bar-fill{
+            height:100%; width:0%; border-radius:2px;
+            background:var(--accent);
+            transition:width .5s cubic-bezier(.2,.8,.2,1);
+          }
+          .test-score{
+            margin-top:8px; font-size:11px; color:var(--text-dim);
+          }
+          .test-score b{ color:var(--text); }
+        
+          .section-title{
+            display:flex; align-items:center; gap:10px;
+            font-size:11px; letter-spacing:.18em; color:var(--text-faint);
+            text-transform:uppercase; margin:40px 0 14px;
+          }
+          .section-title::after{ content:''; flex:1; height:1px; background:var(--border); }
+        
+          .overview-grid{
+            display:grid;
+            grid-template-columns:repeat(auto-fit, minmax(210px,1fr));
+            gap:12px;
+          }
+          .overview-card{
+            border:1px solid var(--border);
+            background:var(--panel);
+            border-radius:6px;
+            padding:18px;
+            transition:border-color .3s ease;
+          }
+          .overview-top{
+            display:flex; align-items:center; gap:10px; margin-bottom:14px;
+          }
+          .overview-tag{
+            font-family:'JetBrains Mono', monospace;
+            font-size:10.5px; font-weight:700; letter-spacing:.06em;
+            border:1px solid var(--border-soft);
+            padding:3px 7px; border-radius:4px;
+            color:var(--text-dim);
+          }
+          .overview-tag.cpu{ color:var(--accent); border-color:var(--accent); }
+          .overview-tag.gpu{ color:var(--accent-2); border-color:var(--accent-2); }
+          .overview-tag.memory{ color:#D9B45C; border-color:#D9B45C; }
+          .overview-tag.ram{ color:var(--good); border-color:var(--good); }
+          .overview-label{ font-size:13px; font-weight:600; }
+          .overview-info{
+            font-size:11.5px; color:var(--text-faint); line-height:1.6; margin-bottom:14px;
+            min-height:34px;
+          }
+          .overview-score-row{
+            display:flex; align-items:baseline; justify-content:space-between; margin-bottom:8px;
+          }
+          .overview-score{ font-family:'JetBrains Mono', monospace; font-size:20px; font-weight:500; }
+          .overview-badge{
+            font-size:9.5px; letter-spacing:.1em; text-transform:uppercase;
+            padding:3px 8px; border-radius:3px;
+            border:1px solid var(--border-soft); color:var(--text-faint);
+          }
+          .overview-badge.good{ color:var(--good); border-color:var(--good); }
+          .overview-badge.warn{ color:var(--warn); border-color:var(--warn); }
+          .overview-badge.bad{ color:var(--bad); border-color:var(--bad); }
+          .overview-bar-track{
+            height:4px; border-radius:2px; background:var(--border-soft); overflow:hidden;
+          }
+          .overview-bar-fill{
+            height:100%; width:0%; border-radius:2px; background:var(--accent);
+            transition:width .6s cubic-bezier(.2,.8,.2,1);
+          }
+        
+          .upgrade-section{ display:none; }
+          .upgrade-list{ display:flex; flex-direction:column; gap:10px; }
+          .upgrade-card{
+            display:flex; gap:14px;
+            border:1px solid var(--border);
+            border-left:3px solid var(--text-faint);
+            background:var(--panel);
+            border-radius:6px;
+            padding:16px 18px;
+          }
+          .upgrade-card.good{ border-left-color:var(--good); }
+          .upgrade-card.warn{ border-left-color:var(--warn); }
+          .upgrade-card.bad{ border-left-color:var(--bad); }
+          .upgrade-tag{
+            font-family:'JetBrains Mono', monospace; font-size:10px; font-weight:700;
+            color:var(--text-faint); min-width:40px; padding-top:2px;
+          }
+          .upgrade-card.good .upgrade-tag{ color:var(--good); }
+          .upgrade-card.warn .upgrade-tag{ color:var(--warn); }
+          .upgrade-card.bad .upgrade-tag{ color:var(--bad); }
+          .upgrade-body .upgrade-head{
+            display:flex; align-items:center; gap:8px; margin-bottom:5px; flex-wrap:wrap;
+          }
+          .upgrade-body .upgrade-name{ font-size:13.5px; font-weight:600; }
+          .upgrade-body .upgrade-status{
+            font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-faint);
+          }
+          .upgrade-body p{ font-size:12.5px; color:var(--text-dim); line-height:1.55; }
+        
+          .composite{
+            margin-top:44px;
+            display:grid;
+            grid-template-columns:220px 1fr;
+            gap:36px;
+            align-items:center;
+            border:1px solid var(--border);
+            background:var(--panel);
+            border-radius:8px;
+            padding:28px;
+          }
+          @media (max-width:640px){
+            .composite{ grid-template-columns:1fr; justify-items:center; text-align:center; }
+          }
+          .gauge-wrap{ position:relative; width:200px; height:200px; margin:0 auto; }
+          .gauge-center{
+            position:absolute; inset:0;
+            display:flex; flex-direction:column; align-items:center; justify-content:center;
+          }
+          .gauge-score{ font-size:38px; font-weight:700; line-height:1; }
+          .gauge-grade{
+            margin-top:6px; font-size:11px; letter-spacing:.16em; color:var(--text-dim); text-transform:uppercase;
+          }
+          .gauge-grade b{ color:var(--accent); font-size:13px; letter-spacing:.05em; }
+        
+          .comp-right{ width:100%; }
+          .comp-title{ font-size:11px; letter-spacing:.16em; color:var(--text-faint); text-transform:uppercase; margin-bottom:6px; }
+          .comp-desc{ font-size:13px; color:var(--text-dim); line-height:1.5; max-width:440px; margin-bottom:22px; }
+        
+          .ruler{ position:relative; height:30px; }
+          .ruler-track{
+            position:absolute; top:12px; left:0; right:0; height:4px;
+            background:var(--border-soft); border-radius:2px; overflow:hidden;
+          }
+          .ruler-fill{
+            position:absolute; top:12px; left:0; height:4px;
+            background:linear-gradient(90deg, var(--accent-2), var(--accent));
+            border-radius:2px; width:0%; transition:width .8s cubic-bezier(.2,.8,.2,1);
+          }
+          .ruler-marker{
+            position:absolute; top:4px; width:14px; height:14px;
+            border-radius:50%; background:var(--bg); border:3px solid var(--accent);
+            transform:translateX(-50%); left:0%;
+            transition:left .8s cubic-bezier(.2,.8,.2,1);
+            box-shadow:0 0 10px rgba(255,122,51,.5);
+          }
+          .ruler-ticks{
+            display:flex; justify-content:space-between;
+            margin-top:20px; font-size:10.5px; color:var(--text-faint);
+            letter-spacing:.04em; text-transform:uppercase;
+          }
+        
+          .log-panel{
+            margin-top:20px;
+            border:1px solid var(--border);
+            border-radius:6px;
+            background:var(--panel-alt);
+            padding:14px 16px;
+            height:130px;
+            overflow-y:auto;
+          }
+          .log-title{
+            font-size:10px; letter-spacing:.14em; color:var(--text-faint);
+            text-transform:uppercase; margin-bottom:8px;
+          }
+          .log-line{
+            font-size:12px; color:var(--text-dim); line-height:1.7;
+            white-space:pre-wrap;
+          }
+          .log-line .t{ color:var(--text-faint); }
+          .log-line .k{ color:var(--accent-2); }
+          .log-line b{ color:var(--text); font-weight:500; }
+          .log-panel::-webkit-scrollbar{ width:6px; }
+          .log-panel::-webkit-scrollbar-thumb{ background:var(--border); border-radius:3px; }
+        
+          footer{
+            margin-top:26px;
+            font-size:11px; color:var(--text-faint);
+            display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;
+          }
+        
+          @media (prefers-reduced-motion: reduce){
+            *{ transition:none !important; animation:none !important; }
+          }
+    </style>
+</head>
+
+<body>
+
+    <div class="scope-wrap">
+        <div class="scope">
+            <div class="scope-label">SCOPE <b id="scopeMode">IDLE</b></div>
+            <div class="scope-live"><span class="dot" id="liveDot"></span><span id="liveText">STANDBY</span></div>
+            <canvas id="scopeCanvas"></canvas>
+        </div>
+    </div>
+
+    <div class="app">
+        <header>
+            <div class="eyebrow">Diagnostic Suite · Rev 2.4</div>
+            <h1>System Benchmark</h1>
+            <p class="sub">Five calibrated tests measure this browser's compute, memory, and render throughput against a mid-2020s laptop baseline. Runs entirely on this device — nothing leaves the page. Takes about ten seconds.</p>
+            <div class="run-row">
+                <button id="runBtn">Run Benchmark</button>
+                <div class="run-status" id="runStatus">Ready when you are.</div>
+            </div>
+        </header>
+
+        <div class="section-title">System Overview</div>
+        <section class="overview-grid" id="overviewGrid"></section>
+
+        <div class="section-title">Test Detail</div>
+        <section class="tests-grid" id="testsGrid"></section>
+
+        <section class="composite">
+            <div class="gauge-wrap">
+                <svg id="gaugeSvg" viewBox="0 0 200 200" width="200" height="200"></svg>
+                <div class="gauge-center">
+                    <div class="gauge-score mono" id="gaugeScore">—</div>
+                    <div class="gauge-grade">grade <b id="gaugeGrade">—</b></div>
+                </div>
+            </div>
+            <div class="comp-right">
+                <div class="comp-title">Composite Result</div>
+                <div class="comp-desc" id="compDesc">Run the suite to see how this device compares across compute, memory, and render throughput.</div>
+                <div class="ruler">
+                    <div class="ruler-track"></div>
+                    <div class="ruler-fill" id="rulerFill"></div>
+                    <div class="ruler-marker" id="rulerMarker"></div>
+                </div>
+                <div class="ruler-ticks">
+                    <span>Entry</span><span>Mid</span><span>High</span><span>Elite</span>
+                </div>
+            </div>
+        </section>
+
+        <div class="section-title" id="upgradeSection" style="display:none;">Upgrade Suggestions</div>
+        <section class="upgrade-list" id="upgradeList" style="margin-bottom:8px;"></section>
+
+        <div class="log-panel">
+            <div class="log-title">Run Log</div>
+            <div id="logBody"></div>
+        </div>
+
+        <footer>
+            <span id="footLeft">No run yet.</span>
+            <span id="footRight" class="mono">CHK ————</span>
+        </footer>
+    </div>
+
+    <div id="domSandbox" style="position:absolute; width:0; height:0; overflow:hidden;"></div>
+
+    <script>
+        (function(){
+        
+          const TESTS = [
+            { id:'cpu',    name:'Compute',   unit:'ops/s', desc:'Trig and root-finding math in a tight loop.' , baseline:45000000 },
+            { id:'memory', name:'Memory',    unit:'MB/s',  desc:'Sequential read/write across a typed array.'  , baseline:2500 },
+            { id:'sort',   name:'Sort',      unit:'elem/s',desc:'Comparison sort of 400,000 random floats.'    , baseline:1500000 },
+            { id:'dom',    name:'DOM',       unit:'ops/s', desc:'Create, mount, and tear down 8,000 nodes.'    , baseline:40000 },
+            { id:'render', name:'Render',    unit:'fps',   desc:'Sustained canvas draw calls for 1.2 seconds.' , baseline:60 },
+          ];
+        
+          let results = {};
+          let checksum = 0;
+        
+          const grid = document.getElementById('testsGrid');
+          TESTS.forEach((t,i)=>{
+            const card = document.createElement('div');
+            card.className = 'test-card';
+            card.id = 'card-'+t.id;
+            card.innerHTML = `
+              <div class="test-head">
+                <div class="test-num mono">0${i+1}</div>
+                <div class="test-status" id="status-${t.id}">Idle</div>
+              </div>
+              <div class="test-name">${t.name}</div>
+              <div class="test-desc">${t.desc}</div>
+              <div class="test-readout mono" id="readout-${t.id}">—</div>
+              <div class="test-bar-track"><div class="test-bar-fill" id="bar-${t.id}"></div></div>
+              <div class="test-score">score <b id="score-${t.id}">—</b></div>
+            `;
+            grid.appendChild(card);
+          });
+        
+          const sysInfo = { cores:null, ramGB:null, gpu:null };
+          sysInfo.cores = navigator.hardwareConcurrency || null;
+          sysInfo.ramGB = ('deviceMemory' in navigator) ? navigator.deviceMemory : null;
+          (function detectGPU(){
+            try{
+              const c = document.createElement('canvas');
+              const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+              if(!gl){ sysInfo.gpu = 'WebGL unavailable'; return; }
+              const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+              sysInfo.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : (gl.getParameter(gl.RENDERER) || 'Not exposed by browser');
+            }catch(e){ sysInfo.gpu = 'Not available'; }
+          })();
+        
+          const CATEGORIES = [
+            { key:'cpu',    tag:'CPU', label:'Processor',       tests:['cpu','sort','dom'],
+              info: () => (sysInfo.cores ? sysInfo.cores+' logical cores · ' : '') + 'compute, sort &amp; DOM throughput' },
+            { key:'gpu',    tag:'GPU', label:'Graphics',         tests:['render'],
+              info: () => (sysInfo.gpu || 'Renderer not reported') },
+            { key:'memory', tag:'MEM', label:'Memory Bandwidth', tests:['memory'],
+              info: () => 'Sequential read/write throughput' },
+            { key:'ram',    tag:'RAM', label:'Memory Capacity',  tests:[],
+              info: () => (sysInfo.ramGB ? '≈'+sysInfo.ramGB+' GB reported by browser' : 'Not reported by this browser') },
+          ];
+        
+          const overviewGrid = document.getElementById('overviewGrid');
+          CATEGORIES.forEach(cat=>{
+            const card = document.createElement('div');
+            card.className = 'overview-card';
+            card.id = 'ov-'+cat.key;
+            card.innerHTML = `
+              <div class="overview-top">
+                <span class="overview-tag ${cat.key}">${cat.tag}</span>
+                <span class="overview-label">${cat.label}</span>
+              </div>
+              <div class="overview-info">${cat.info()}</div>
+              <div class="overview-score-row">
+                <span class="overview-score mono" id="ov-score-${cat.key}">—</span>
+                <span class="overview-badge" id="ov-badge-${cat.key}">Pending</span>
+              </div>
+              <div class="overview-bar-track"><div class="overview-bar-fill" id="ov-bar-${cat.key}"></div></div>
+            `;
+            overviewGrid.appendChild(card);
+          });
+        
+          function statusFor(score){
+            if (score === null || score === undefined) return { label:'Pending', cls:'' };
+            if (score >= 110) return { label:'Excellent', cls:'good' };
+            if (score >= 90)  return { label:'Good', cls:'good' };
+            if (score >= 70)  return { label:'Fair', cls:'warn' };
+            if (score >= 50)  return { label:'Weak', cls:'warn' };
+            return { label:'Poor', cls:'bad' };
+          }
+        
+          function categoryScore(cat){
+            const scores = cat.tests.map(id => results[id] ? results[id].score : null).filter(s=>s!==null);
+            if (!scores.length) return null;
+            return scores.reduce((a,b)=>a+b,0)/scores.length;
+          }
+        
+          function updateOverview(){
+            CATEGORIES.forEach(cat=>{
+              if (cat.key === 'ram') return; 
+              const score = categoryScore(cat);
+              const st = statusFor(score);
+              document.getElementById('ov-score-'+cat.key).textContent = score===null ? '—' : score.toFixed(0);
+              const badge = document.getElementById('ov-badge-'+cat.key);
+              badge.textContent = st.label;
+              badge.className = 'overview-badge' + (st.cls ? ' '+st.cls : '');
+              document.getElementById('ov-bar-'+cat.key).style.width = (score===null ? 0 : Math.max(4,Math.min(100,score))) + '%';
+            });
+            const ramBadge = document.getElementById('ov-badge-ram');
+            const gb = sysInfo.ramGB;
+            let ramStatus = { label:'Unknown', cls:'' };
+            if (gb !== null){
+              if (gb < 4) ramStatus = { label:'Low', cls:'bad' };
+              else if (gb < 8) ramStatus = { label:'Adequate', cls:'warn' };
+              else if (gb < 16) ramStatus = { label:'Good', cls:'good' };
+              else ramStatus = { label:'Excellent', cls:'good' };
+            }
+            ramBadge.textContent = ramStatus.label;
+            ramBadge.className = 'overview-badge' + (ramStatus.cls ? ' '+ramStatus.cls : '');
+            document.getElementById('ov-score-ram').textContent = gb !== null ? gb+' GB' : '—';
+            document.getElementById('ov-bar-ram').style.width = gb !== null ? Math.max(4,Math.min(100,(gb/16)*100))+'%' : '0%';
+          }
+          updateOverview(); 
+        
+          function buildUpgradeSuggestions(){
+            const titleEl = document.getElementById('upgradeSection');
+            const list = document.getElementById('upgradeList');
+            list.innerHTML = '';
+            titleEl.style.display = 'flex';
+            list.style.display = 'flex';
+        
+            const items = [];
+            const cpuScore = categoryScore(CATEGORIES[0]);
+            const gpuScore = categoryScore(CATEGORIES[1]);
+            const memScore = categoryScore(CATEGORIES[2]);
+            const ramGB = sysInfo.ramGB;
+        
+            if (cpuScore !== null){
+              const st = statusFor(cpuScore);
+              const needsWork = st.cls === 'bad' || st.cls === 'warn';
+              items.push({ tag:'CPU', name:'Processor', st, text: needsWork
+                ? `Sustained compute scored ${cpuScore.toFixed(0)} pts — ${st.label.toLowerCase()} against baseline. If this holds across repeat runs, check for background processes or thermal throttling first; if it persists, a newer or higher core-count processor gives the biggest overall speedup.`
+                : `Compute scored ${cpuScore.toFixed(0)} pts. No action needed — this processor is keeping pace with or beating the baseline.` });
+            }
+            if (gpuScore !== null){
+              const st = statusFor(gpuScore);
+              const needsWork = st.cls === 'bad' || st.cls === 'warn';
+              items.push({ tag:'GPU', name:'Graphics', st, text: needsWork
+                ? `Render throughput scored ${gpuScore.toFixed(0)} pts — below a smooth 60fps under load. Try updating graphics drivers and closing other GPU-heavy tabs; if frame rate stays low, a newer or discrete GPU would help most with graphics-heavy work.`
+                : `Render throughput scored ${gpuScore.toFixed(0)} pts. No action needed — frames are rendering smoothly.` });
+            }
+            if (memScore !== null){
+              const st = statusFor(memScore);
+              const needsWork = st.cls === 'bad' || st.cls === 'warn';
+              items.push({ tag:'MEM', name:'Memory Bandwidth', st, text: needsWork
+                ? `Memory throughput scored ${memScore.toFixed(0)} pts. Heavy background memory use can cause this; if it's consistent, faster RAM modules would raise the ceiling.`
+                : `Memory throughput scored ${memScore.toFixed(0)} pts. No action needed.` });
+            }
+            if (ramGB !== null){
+              if (ramGB < 8){
+                items.push({ tag:'RAM', name:'Memory Capacity', st:{ label: ramGB<4?'Low':'Adequate', cls: ramGB<4?'bad':'warn' },
+                  text:`This device reports about ${ramGB} GB of memory, which is on the low side for modern multitasking. Adding RAM — 8 GB → 16 GB or more — is usually the cheapest way to cut down on slowdowns from swapping.` });
+              } else {
+                items.push({ tag:'RAM', name:'Memory Capacity', st:{ label:'Good', cls:'good' },
+                  text:`This device reports about ${ramGB} GB of memory — comfortable headroom for typical multitasking. No action needed.` });
+              }
+            } else {
+              items.push({ tag:'RAM', name:'Memory Capacity', st:{ label:'Unknown', cls:'' },
+                text:`This browser doesn't report memory capacity. If the system feels slow under heavy multitasking, checking installed RAM directly (Task Manager / Activity Monitor) is worth a look.` });
+            }
+        
+            if (items.length && items.every(it => it.st.cls !== 'bad' && it.st.cls !== 'warn')){
+              const note = document.createElement('div');
+              note.className = 'upgrade-card good';
+              note.innerHTML = `<div class="upgrade-tag mono">ALL</div><div class="upgrade-body"><div class="upgrade-head"><span class="upgrade-name">Nothing to flag</span><span class="upgrade-status">Optimal</span></div><p>Every subsystem is scoring at or above baseline. This device isn't the bottleneck right now.</p></div>`;
+              list.appendChild(note);
+            }
+        
+            items.forEach(it=>{
+              const card = document.createElement('div');
+              card.className = 'upgrade-card ' + (it.st.cls || '');
+              card.innerHTML = `
+                <div class="upgrade-tag mono">${it.tag}</div>
+                <div class="upgrade-body">
+                  <div class="upgrade-head"><span class="upgrade-name">${it.name}</span><span class="upgrade-status">${it.st.label}</span></div>
+                  <p>${it.text}</p>
+                </div>`;
+              list.appendChild(card);
+            });
+          }
+        
+          function setStatus(id, label, cls){
+            const el = document.getElementById('status-'+id);
+            el.textContent = label;
+            el.className = 'test-status' + (cls ? ' '+cls : '');
+          }
+          function setCard(id, cls){
+            document.getElementById('card-'+id).className = 'test-card' + (cls ? ' '+cls : '');
+          }
+    
+          const logBody = document.getElementById('logBody');
+          const t0 = performance.now();
+          function log(key, msg){
+            const el = document.createElement('div');
+            el.className = 'log-line';
+            const stamp = ((performance.now()-t0)/1000).toFixed(2).padStart(5,'0');
+            el.innerHTML = `<span class="t mono">[${stamp}s]</span> <span class="k mono">${key}</span> ${msg}`;
+            logBody.appendChild(el);
+            logBody.parentElement.scrollTop = logBody.parentElement.scrollHeight;
+          }
+        
+          function fmt(n){
+            if (n >= 1e6) return (n/1e6).toFixed(2)+'M';
+            if (n >= 1e3) return (n/1e3).toFixed(1)+'K';
+            return n.toFixed(n < 10 ? 2 : 0);
+          }
+
+          const canvas = document.getElementById('scopeCanvas');
+          const ctx = canvas.getContext('2d');
+          const scopeModeEl = document.getElementById('scopeMode');
+          const liveDot = document.getElementById('liveDot');
+          const liveText = document.getElementById('liveText');
+          let W=0, H=0, DPR=1;
+        
+          function resizeCanvas(){
+            const rect = canvas.getBoundingClientRect();
+            DPR = window.devicePixelRatio || 1;
+            W = rect.width; H = rect.height;
+            canvas.width = W*DPR; canvas.height = H*DPR;
+            ctx.setTransform(DPR,0,0,DPR,0,0);
+          }
+          window.addEventListener('resize', resizeCanvas);
+          resizeCanvas();
+        
+          let idleT = 0;
+          let idleRaf = null;
+          function drawIdle(){
+            idleT += 0.028;
+            ctx.clearRect(0,0,W,H);
+            ctx.beginPath();
+            const mid = H/2;
+            for(let x=0;x<=W;x+=2){
+              const y = mid + Math.sin(x*0.045 + idleT)*6 + Math.sin(x*0.011 + idleT*0.6)*3;
+              if(x===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+            }
+            ctx.strokeStyle = 'rgba(79,209,197,0.55)';
+            ctx.lineWidth = 1.4;
+            ctx.stroke();
+            idleRaf = requestAnimationFrame(drawIdle);
+          }
+          drawIdle();
+        
+          function drawTrace(samples, color){
+            ctx.clearRect(0,0,W,H);
+            ctx.beginPath();
+            const mid = H/2;
+            const max = Math.max(8, ...samples.map(s=>Math.abs(s)));
+            const scaleX = W / Math.max(1, samples.length-1);
+            samples.forEach((v,i)=>{
+              const x = i*scaleX;
+              const y = mid - (v/max) * (H*0.4);
+              if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+            });
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.6;
+            ctx.stroke();
+          }
+
+          const gaugeSvg = document.getElementById('gaugeSvg');
+          const NS = 'http://www.w3.org/2000/svg';
+          function polar(cx,cy,r,angleDeg){
+            const a = (angleDeg-90) * Math.PI/180;
+            return { x: cx + r*Math.cos(a), y: cy + r*Math.sin(a) };
+          }
+          function arcPath(cx,cy,r,a0,a1){
+            const s = polar(cx,cy,r,a0);
+            const e = polar(cx,cy,r,a1);
+            const large = (a1-a0) > 180 ? 1 : 0;
+            return `M ${s.x} ${s.y} A ${r} ${r} 0 ${large} 1 ${e.x} ${e.y}`;
+          }
+        
+          const CX=100, CY=100, R=80, A_START=-135, A_END=135;
+
+          const trackPath = document.createElementNS(NS,'path');
+          trackPath.setAttribute('d', arcPath(CX,CY,R,A_START,A_END));
+          trackPath.setAttribute('fill','none');
+          trackPath.setAttribute('stroke','#2A2519');
+          trackPath.setAttribute('stroke-width','12');
+          trackPath.setAttribute('stroke-linecap','round');
+          gaugeSvg.appendChild(trackPath);
+
+          const tickLabels = [0,25,50,75,100,125,150];
+          tickLabels.forEach((val,i)=>{
+            const ang = A_START + (i/(tickLabels.length-1))*(A_END-A_START);
+            const p1 = polar(CX,CY,R+9, ang);
+            const p2 = polar(CX,CY,R+1, ang);
+            const line = document.createElementNS(NS,'line');
+            line.setAttribute('x1',p1.x); line.setAttribute('y1',p1.y);
+            line.setAttribute('x2',p2.x); line.setAttribute('y2',p2.y);
+            line.setAttribute('stroke','#5E5747'); line.setAttribute('stroke-width','1.5');
+            gaugeSvg.appendChild(line);
+        
+            const lp = polar(CX,CY,R+20, ang);
+            const text = document.createElementNS(NS,'text');
+            text.setAttribute('x',lp.x); text.setAttribute('y',lp.y+3);
+            text.setAttribute('text-anchor','middle');
+            text.setAttribute('font-size','8');
+            text.setAttribute('font-family','JetBrains Mono, monospace');
+            text.setAttribute('fill','#5E5747');
+            text.textContent = val;
+            gaugeSvg.appendChild(text);
+          });
+        
+          // value arc
+          const valuePath = document.createElementNS(NS,'path');
+          valuePath.setAttribute('fill','none');
+          valuePath.setAttribute('stroke','#FF7A33');
+          valuePath.setAttribute('stroke-width','12');
+          valuePath.setAttribute('stroke-linecap','round');
+          valuePath.style.transition = 'stroke-dasharray .8s cubic-bezier(.2,.8,.2,1)';
+          valuePath.setAttribute('d', arcPath(CX,CY,R,A_START,A_END));
+          const fullLen = Math.PI * R * (270/180);
+          valuePath.setAttribute('stroke-dasharray', `0 ${fullLen}`);
+          gaugeSvg.appendChild(valuePath);
+        
+          function setGauge(score){
+            const pct = Math.max(0, Math.min(1, score/150));
+            const len = fullLen * pct;
+            valuePath.setAttribute('stroke-dasharray', `${len} ${fullLen}`);
+            let color = '#FF7A33';
+            if (score >= 110) color = '#7FCE8C';
+            else if (score < 60) color = '#E85C4A';
+            valuePath.setAttribute('stroke', color);
+          }
+
+          function runCPU(){
+            const start = performance.now();
+            let x = 0;
+            const iterations = 6000000;
+            for(let i=0;i<iterations;i++){
+              x += Math.sqrt(i) * Math.sin(i) - Math.cos(i*0.5);
+            }
+            const elapsed = performance.now() - start;
+            const opsPerSec = iterations / (elapsed/1000);
+            checksum += x % 97;
+            return { raw: opsPerSec, display: fmt(opsPerSec), score: (opsPerSec/45000000)*100 };
+          }
+        
+          function runMemory(){
+            const start = performance.now();
+            const size = 5000000;
+            const arr = new Float64Array(size);
+            for(let i=0;i<size;i++) arr[i] = i * 1.0000001;
+            let sum = 0;
+            for(let i=0;i<size;i++) sum += arr[i];
+            const elapsed = performance.now() - start;
+            const bytes = size * 8 * 2;
+            const mbPerSec = (bytes/1e6) / (elapsed/1000);
+            checksum += sum % 97;
+            return { raw: mbPerSec, display: fmt(mbPerSec), score: (mbPerSec/2500)*100 };
+          }
+        
+          function runSort(){
+            const start = performance.now();
+            const n = 400000;
+            const arr = new Array(n);
+            for(let i=0;i<n;i++) arr[i] = Math.random();
+            arr.sort((a,b)=>a-b);
+            const elapsed = performance.now() - start;
+            const elemPerSec = n / (elapsed/1000);
+            checksum += arr[0] * 1000 % 97;
+            return { raw: elemPerSec, display: fmt(elemPerSec), score: (elemPerSec/1500000)*100 };
+          }
+        
+          function runDOM(){
+            return new Promise(resolve=>{
+              const start = performance.now();
+              const container = document.getElementById('domSandbox');
+              const n = 8000;
+              const frag = document.createDocumentFragment();
+              for(let i=0;i<n;i++){
+                const el = document.createElement('div');
+                el.className = 'probe';
+                el.textContent = i;
+                frag.appendChild(el);
+              }
+              container.appendChild(frag);
+              void container.offsetHeight;
+              container.innerHTML = '';
+              const elapsed = performance.now() - start;
+              const opsPerSec = n / (elapsed/1000);
+              resolve({ raw: opsPerSec, display: fmt(opsPerSec), score: (opsPerSec/40000)*100 });
+            });
+          }
+        
+          function runRender(){
+            return new Promise(resolve=>{
+              scopeModeEl.textContent = 'RENDER';
+              liveDot.classList.add('on'); liveText.textContent = 'ACTIVE';
+              if (idleRaf) cancelAnimationFrame(idleRaf);
+              const duration = 1200;
+              let frames = 0;
+              const start = performance.now();
+              let last = start;
+              const trace = [];
+              const shapes = 220;
+        
+              function stressFrame(){
+                ctx.save();
+                for(let i=0;i<shapes;i++){
+                  const x = (i*37 + frames*3) % (W+40) - 20;
+                  const y = (i*19) % H;
+                  ctx.fillStyle = i % 2 === 0 ? 'rgba(255,122,51,0.5)' : 'rgba(79,209,197,0.35)';
+                  ctx.beginPath();
+                  ctx.arc(x, y, 2.4, 0, Math.PI*2);
+                  ctx.fill();
+                }
+                ctx.restore();
+              }
+        
+              function frame(now){
+                frames++;
+                const dt = now - last; last = now;
+                trace.push(1000/Math.max(dt,1));
+                if (trace.length > 140) trace.shift();
+                drawTrace(trace, 'rgba(255,122,51,0.85)');
+                stressFrame();
+                if (now - start < duration){
+                  requestAnimationFrame(frame);
+                } else {
+                  const elapsed = now - start;
+                  const fps = frames / (elapsed/1000);
+                  scopeModeEl.textContent = 'IDLE';
+                  liveDot.classList.remove('on'); liveText.textContent = 'STANDBY';
+                  drawIdle();
+                  resolve({ raw: fps, display: fps.toFixed(1), score: (fps/60)*100 });
+                }
+              }
+              requestAnimationFrame(frame);
+            });
+          }
+        
+          const RUNNERS = { cpu: runCPU, memory: runMemory, sort: runSort, dom: runDOM, render: runRender };
+
+          function grade(score){
+            if (score >= 140) return 'S';
+            if (score >= 110) return 'A';
+            if (score >= 90)  return 'B';
+            if (score >= 70)  return 'C';
+            if (score >= 50)  return 'D';
+            return 'F';
+          }
+          function tierLabel(score){
+            if (score >= 120) return 'Elite tier — top-end desktop-class throughput.';
+            if (score >= 80)  return 'High tier — comfortably above the baseline laptop.';
+            if (score >= 45)  return 'Mid tier — in line with a typical modern laptop.';
+            return 'Entry tier — below baseline; background load or throttling may be a factor.';
+          }
+        
+          function updateComposite(){
+            const scores = TESTS.map(t => results[t.id] ? results[t.id].score : 0);
+            const composite = scores.reduce((a,b)=>a+b,0) / TESTS.length;
+            document.getElementById('gaugeScore').textContent = composite.toFixed(0);
+            document.getElementById('gaugeGrade').innerHTML = '<b>'+grade(composite)+'</b>';
+            setGauge(composite);
+            document.getElementById('compDesc').textContent = tierLabel(composite);
+        
+            const pct = Math.max(0, Math.min(1, composite/160)) * 100;
+            document.getElementById('rulerFill').style.width = pct + '%';
+            document.getElementById('rulerMarker').style.left = pct + '%';
+            return composite;
+          }
+
+          const runBtn = document.getElementById('runBtn');
+          const runStatus = document.getElementById('runStatus');
+        
+          async function runAll(){
+            runBtn.disabled = true;
+            runBtn.textContent = 'Running…';
+            runStatus.textContent = 'Test 1 of ' + TESTS.length;
+            results = {};
+            checksum = 0;
+            logBody.innerHTML = '';
+            log('BOOT', 'Initializing diagnostic sequence.');
+        
+            for (let i=0; i<TESTS.length; i++){
+              const t = TESTS[i];
+              runStatus.textContent = `Test ${i+1} of ${TESTS.length} — ${t.name}`;
+              setCard(t.id, 'active');
+              setStatus(t.id, 'Running', 'running');
+              document.getElementById('readout-'+t.id).textContent = '···';
+        
+              await new Promise(r=>setTimeout(r, 60)); // let UI paint
+              const res = await RUNNERS[t.id]();
+              results[t.id] = res;
+        
+              document.getElementById('readout-'+t.id).innerHTML =
+                `${res.display}<span class="unit">${t.unit}</span>`;
+              document.getElementById('bar-'+t.id).style.width =
+                Math.max(4, Math.min(100, res.score)) + '%';
+              document.getElementById('score-'+t.id).textContent = res.score.toFixed(0) + ' pts';
+        
+              setStatus(t.id, 'Pass', 'pass');
+              setCard(t.id, 'done');
+              log(t.id.toUpperCase().padEnd(6), `${t.name} complete — <b>${res.display} ${t.unit}</b> (${res.score.toFixed(0)} pts)`);
+        
+              updateComposite();
+              updateOverview();
+            }
+        
+            const composite = updateComposite();
+            updateOverview();
+            buildUpgradeSuggestions();
+            log('DONE', `Composite score <b>${composite.toFixed(0)}</b>, grade <b>${grade(composite)}</b>.`);
+        
+            const totalTime = ((performance.now()-t0)/1000).toFixed(2);
+            document.getElementById('footLeft').textContent = `Completed in ${totalTime}s · ${new Date().toLocaleTimeString()}`;
+            document.getElementById('footRight').textContent = 'CHK ' + Math.abs(checksum).toFixed(2);
+        
+            runBtn.disabled = false;
+            runBtn.textContent = 'Run Again';
+            runStatus.textContent = 'Suite complete.';
+          }
+        
+          runBtn.addEventListener('click', runAll);
+        
+        })();
+    </script>
+</body>
+
+</html>
