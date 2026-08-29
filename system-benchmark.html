@@ -447,8 +447,15 @@
 
     <script>
         (function(){
-        
-          const TESTS = [
+
+          const DS24_REV = '2.4';
+          const CAL_CARD = 'LT-2025Q4';
+          const runBook = { seq:0, startedAt:0, hiddenAtStart:false, browser:'unknown' };
+
+          // DS24 is a browser-side triage tool, not a hardware lab. This calibration card belongs
+          // to the workload below; changing a loop size or duration without changing CAL_CARD
+          // would make results from the two versions look comparable when they are not.
+          const DS24_CAL = [
             { id:'cpu',    name:'Compute',   unit:'ops/s', desc:'Trig and root-finding math in a tight loop.' , baseline:45000000 },
             { id:'memory', name:'Memory',    unit:'MB/s',  desc:'Sequential read/write across a typed array.'  , baseline:2500 },
             { id:'sort',   name:'Sort',      unit:'elem/s',desc:'Comparison sort of 400,000 random floats.'    , baseline:1500000 },
@@ -456,73 +463,84 @@
             { id:'render', name:'Render',    unit:'fps',   desc:'Sustained canvas draw calls for 1.2 seconds.' , baseline:60 },
           ];
         
-          let results = {};
-          let checksum = 0;
+          let ds24Run = {};
+          let chkAccumulator = 0;
         
           const grid = document.getElementById('testsGrid');
-          TESTS.forEach((t,i)=>{
+          DS24_CAL.forEach((probe,i)=>{
             const card = document.createElement('div');
             card.className = 'test-card';
-            card.id = 'card-'+t.id;
+            card.id = 'card-'+probe.id;
             card.innerHTML = `
               <div class="test-head">
                 <div class="test-num mono">0${i+1}</div>
-                <div class="test-status" id="status-${t.id}">Idle</div>
+                <div class="test-status" id="status-${probe.id}">Idle</div>
               </div>
-              <div class="test-name">${t.name}</div>
-              <div class="test-desc">${t.desc}</div>
-              <div class="test-readout mono" id="readout-${t.id}">—</div>
-              <div class="test-bar-track"><div class="test-bar-fill" id="bar-${t.id}"></div></div>
-              <div class="test-score">score <b id="score-${t.id}">—</b></div>
+              <div class="test-name">${probe.name}</div>
+              <div class="test-desc">${probe.desc}</div>
+              <div class="test-readout mono" id="readout-${probe.id}">—</div>
+              <div class="test-bar-track"><div class="test-bar-fill" id="bar-${probe.id}"></div></div>
+              <div class="test-score">score <b id="score-${probe.id}">—</b></div>
             `;
             grid.appendChild(card);
           });
         
-          const sysInfo = { cores:null, ramGB:null, gpu:null };
-          sysInfo.cores = navigator.hardwareConcurrency || null;
-          sysInfo.ramGB = ('deviceMemory' in navigator) ? navigator.deviceMemory : null;
+          const hostFacts = { cores:null, ramGB:null, gpu:null, notes:[], browser:null, timerOK:true };
+          hostFacts.cores = navigator.hardwareConcurrency || null;
+          hostFacts.ramGB = ('deviceMemory' in navigator) ? navigator.deviceMemory : null;
+
+          const ua = navigator.userAgent || '';
+          if (/Edg\//.test(ua)) runBook.browser = 'edge';
+          else if (/Chrome\//.test(ua)) runBook.browser = 'chromium';
+          else if (/Firefox\//.test(ua)) runBook.browser = 'firefox';
+          else if (/Safari\//.test(ua)) runBook.browser = 'safari';
+          hostFacts.browser = runBook.browser;
+
+          // Firefox/Safari normally withhold deviceMemory. That's an inventory limitation,
+          // not a failed RAM test, so keep capacity "unknown" instead of manufacturing a value.
+          if (hostFacts.ramGB === null) hostFacts.notes.push('RAM capacity not exposed by ' + runBook.browser);
           (function detectGPU(){
             try{
               const c = document.createElement('canvas');
               const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
-              if(!gl){ sysInfo.gpu = 'WebGL unavailable'; return; }
+              if(!gl){ hostFacts.gpu = 'WebGL unavailable'; return; }
               const dbg = gl.getExtension('WEBGL_debug_renderer_info');
-              sysInfo.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : (gl.getParameter(gl.RENDERER) || 'Not exposed by browser');
-            }catch(e){ sysInfo.gpu = 'Not available'; }
+              hostFacts.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : (gl.getParameter(gl.RENDERER) || 'Not exposed by browser');
+            }catch(e){ hostFacts.gpu = 'Not available'; }
           })();
         
-          const CATEGORIES = [
+          const DS24_CHANNELS = [
             { key:'cpu',    tag:'CPU', label:'Processor',       tests:['cpu','sort','dom'],
-              info: () => (sysInfo.cores ? sysInfo.cores+' logical cores · ' : '') + 'compute, sort &amp; DOM throughput' },
+              info: () => (hostFacts.cores ? hostFacts.cores+' logical cores · ' : '') + 'compute, sort &amp; DOM throughput' },
             { key:'gpu',    tag:'GPU', label:'Graphics',         tests:['render'],
-              info: () => (sysInfo.gpu || 'Renderer not reported') },
+              info: () => (hostFacts.gpu || 'Renderer not reported') },
             { key:'memory', tag:'MEM', label:'Memory Bandwidth', tests:['memory'],
               info: () => 'Sequential read/write throughput' },
             { key:'ram',    tag:'RAM', label:'Memory Capacity',  tests:[],
-              info: () => (sysInfo.ramGB ? '≈'+sysInfo.ramGB+' GB reported by browser' : 'Not reported by this browser') },
+              info: () => (hostFacts.ramGB ? '≈'+hostFacts.ramGB+' GB reported by browser' : 'Not reported by this browser') },
           ];
         
           const overviewGrid = document.getElementById('overviewGrid');
-          CATEGORIES.forEach(cat=>{
+          DS24_CHANNELS.forEach(group=>{
             const card = document.createElement('div');
             card.className = 'overview-card';
-            card.id = 'ov-'+cat.key;
+            card.id = 'ov-'+group.key;
             card.innerHTML = `
               <div class="overview-top">
-                <span class="overview-tag ${cat.key}">${cat.tag}</span>
-                <span class="overview-label">${cat.label}</span>
+                <span class="overview-tag ${group.key}">${group.tag}</span>
+                <span class="overview-label">${group.label}</span>
               </div>
-              <div class="overview-info">${cat.info()}</div>
+              <div class="overview-info">${group.info()}</div>
               <div class="overview-score-row">
-                <span class="overview-score mono" id="ov-score-${cat.key}">—</span>
-                <span class="overview-badge" id="ov-badge-${cat.key}">Pending</span>
+                <span class="overview-score mono" id="ov-score-${group.key}">—</span>
+                <span class="overview-badge" id="ov-badge-${group.key}">Pending</span>
               </div>
-              <div class="overview-bar-track"><div class="overview-bar-fill" id="ov-bar-${cat.key}"></div></div>
+              <div class="overview-bar-track"><div class="overview-bar-fill" id="ov-bar-${group.key}"></div></div>
             `;
             overviewGrid.appendChild(card);
           });
         
-          function statusFor(score){
+          function ds24Band(score){
             if (score === null || score === undefined) return { label:'Pending', cls:'' };
             if (score >= 110) return { label:'Excellent', cls:'good' };
             if (score >= 90)  return { label:'Good', cls:'good' };
@@ -531,25 +549,25 @@
             return { label:'Poor', cls:'bad' };
           }
         
-          function categoryScore(cat){
-            const scores = cat.tests.map(id => results[id] ? results[id].score : null).filter(s=>s!==null);
+          function channelMean(group){
+            const scores = group.tests.map(id => ds24Run[id] ? ds24Run[id].score : null).filter(s=>s!==null);
             if (!scores.length) return null;
             return scores.reduce((a,b)=>a+b,0)/scores.length;
           }
         
-          function updateOverview(){
-            CATEGORIES.forEach(cat=>{
-              if (cat.key === 'ram') return; 
-              const score = categoryScore(cat);
-              const st = statusFor(score);
-              document.getElementById('ov-score-'+cat.key).textContent = score===null ? '—' : score.toFixed(0);
-              const badge = document.getElementById('ov-badge-'+cat.key);
+          function redrawHostCards(){
+            DS24_CHANNELS.forEach(group=>{
+              if (group.key === 'ram') return; 
+              const score = channelMean(group);
+              const st = ds24Band(score);
+              document.getElementById('ov-score-'+group.key).textContent = score===null ? '—' : score.toFixed(0);
+              const badge = document.getElementById('ov-badge-'+group.key);
               badge.textContent = st.label;
               badge.className = 'overview-badge' + (st.cls ? ' '+st.cls : '');
-              document.getElementById('ov-bar-'+cat.key).style.width = (score===null ? 0 : Math.max(4,Math.min(100,score))) + '%';
+              document.getElementById('ov-bar-'+group.key).style.width = (score===null ? 0 : Math.max(4,Math.min(100,score))) + '%';
             });
             const ramBadge = document.getElementById('ov-badge-ram');
-            const gb = sysInfo.ramGB;
+            const gb = hostFacts.ramGB;
             let ramStatus = { label:'Unknown', cls:'' };
             if (gb !== null){
               if (gb < 4) ramStatus = { label:'Low', cls:'bad' };
@@ -562,9 +580,9 @@
             document.getElementById('ov-score-ram').textContent = gb !== null ? gb+' GB' : '—';
             document.getElementById('ov-bar-ram').style.width = gb !== null ? Math.max(4,Math.min(100,(gb/16)*100))+'%' : '0%';
           }
-          updateOverview(); 
+          redrawHostCards(); 
         
-          function buildUpgradeSuggestions(){
+          function writeFieldNotes(){
             const titleEl = document.getElementById('upgradeSection');
             const list = document.getElementById('upgradeList');
             list.innerHTML = '';
@@ -572,27 +590,27 @@
             list.style.display = 'flex';
         
             const items = [];
-            const cpuScore = categoryScore(CATEGORIES[0]);
-            const gpuScore = categoryScore(CATEGORIES[1]);
-            const memScore = categoryScore(CATEGORIES[2]);
-            const ramGB = sysInfo.ramGB;
+            const cpuScore = channelMean(DS24_CHANNELS[0]);
+            const gpuScore = channelMean(DS24_CHANNELS[1]);
+            const memScore = channelMean(DS24_CHANNELS[2]);
+            const ramGB = hostFacts.ramGB;
         
             if (cpuScore !== null){
-              const st = statusFor(cpuScore);
+              const st = ds24Band(cpuScore);
               const needsWork = st.cls === 'bad' || st.cls === 'warn';
               items.push({ tag:'CPU', name:'Processor', st, text: needsWork
                 ? `Sustained compute scored ${cpuScore.toFixed(0)} pts — ${st.label.toLowerCase()} against baseline. If this holds across repeat runs, check for background processes or thermal throttling first; if it persists, a newer or higher core-count processor gives the biggest overall speedup.`
                 : `Compute scored ${cpuScore.toFixed(0)} pts. No action needed — this processor is keeping pace with or beating the baseline.` });
             }
             if (gpuScore !== null){
-              const st = statusFor(gpuScore);
+              const st = ds24Band(gpuScore);
               const needsWork = st.cls === 'bad' || st.cls === 'warn';
               items.push({ tag:'GPU', name:'Graphics', st, text: needsWork
                 ? `Render throughput scored ${gpuScore.toFixed(0)} pts — below a smooth 60fps under load. Try updating graphics drivers and closing other GPU-heavy tabs; if frame rate stays low, a newer or discrete GPU would help most with graphics-heavy work.`
                 : `Render throughput scored ${gpuScore.toFixed(0)} pts. No action needed — frames are rendering smoothly.` });
             }
             if (memScore !== null){
-              const st = statusFor(memScore);
+              const st = ds24Band(memScore);
               const needsWork = st.cls === 'bad' || st.cls === 'warn';
               items.push({ tag:'MEM', name:'Memory Bandwidth', st, text: needsWork
                 ? `Memory throughput scored ${memScore.toFixed(0)} pts. Heavy background memory use can cause this; if it's consistent, faster RAM modules would raise the ceiling.`
@@ -631,18 +649,18 @@
             });
           }
         
-          function setStatus(id, label, cls){
+          function stampProbeState(id, label, cls){
             const el = document.getElementById('status-'+id);
             el.textContent = label;
             el.className = 'test-status' + (cls ? ' '+cls : '');
           }
-          function setCard(id, cls){
+          function markProbeCard(id, cls){
             document.getElementById('card-'+id).className = 'test-card' + (cls ? ' '+cls : '');
           }
     
           const logBody = document.getElementById('logBody');
           const t0 = performance.now();
-          function log(key, msg){
+          function ledger(key, msg){
             const el = document.createElement('div');
             el.className = 'log-line';
             const stamp = ((performance.now()-t0)/1000).toFixed(2).padStart(5,'0');
@@ -651,7 +669,7 @@
             logBody.parentElement.scrollTop = logBody.parentElement.scrollHeight;
           }
         
-          function fmt(n){
+          function meterText(n){
             if (n >= 1e6) return (n/1e6).toFixed(2)+'M';
             if (n >= 1e3) return (n/1e3).toFixed(1)+'K';
             return n.toFixed(n < 10 ? 2 : 0);
@@ -659,24 +677,25 @@
 
           const canvas = document.getElementById('scopeCanvas');
           const ctx = canvas.getContext('2d');
+          if (!ctx) hostFacts.notes.push('2D canvas unavailable; GFX probe will fault');
           const scopeModeEl = document.getElementById('scopeMode');
           const liveDot = document.getElementById('liveDot');
           const liveText = document.getElementById('liveText');
           let W=0, H=0, DPR=1;
         
-          function resizeCanvas(){
+          function refitScope(){
             const rect = canvas.getBoundingClientRect();
             DPR = window.devicePixelRatio || 1;
             W = rect.width; H = rect.height;
             canvas.width = W*DPR; canvas.height = H*DPR;
             ctx.setTransform(DPR,0,0,DPR,0,0);
           }
-          window.addEventListener('resize', resizeCanvas);
-          resizeCanvas();
+          window.addEventListener('resize', refitScope);
+          refitScope();
         
           let idleT = 0;
           let idleRaf = null;
-          function drawIdle(){
+          function idleScope(){
             idleT += 0.028;
             ctx.clearRect(0,0,W,H);
             ctx.beginPath();
@@ -688,11 +707,11 @@
             ctx.strokeStyle = 'rgba(79,209,197,0.55)';
             ctx.lineWidth = 1.4;
             ctx.stroke();
-            idleRaf = requestAnimationFrame(drawIdle);
+            idleRaf = requestAnimationFrame(idleScope);
           }
-          drawIdle();
+          idleScope();
         
-          function drawTrace(samples, color){
+          function plotScope(samples, color){
             ctx.clearRect(0,0,W,H);
             ctx.beginPath();
             const mid = H/2;
@@ -710,13 +729,13 @@
 
           const gaugeSvg = document.getElementById('gaugeSvg');
           const NS = 'http://www.w3.org/2000/svg';
-          function polar(cx,cy,r,angleDeg){
+          function gaugePoint(cx,cy,r,angleDeg){
             const a = (angleDeg-90) * Math.PI/180;
             return { x: cx + r*Math.cos(a), y: cy + r*Math.sin(a) };
           }
-          function arcPath(cx,cy,r,a0,a1){
-            const s = polar(cx,cy,r,a0);
-            const e = polar(cx,cy,r,a1);
+          function gaugeArc(cx,cy,r,a0,a1){
+            const s = gaugePoint(cx,cy,r,a0);
+            const e = gaugePoint(cx,cy,r,a1);
             const large = (a1-a0) > 180 ? 1 : 0;
             return `M ${s.x} ${s.y} A ${r} ${r} 0 ${large} 1 ${e.x} ${e.y}`;
           }
@@ -724,7 +743,7 @@
           const CX=100, CY=100, R=80, A_START=-135, A_END=135;
 
           const trackPath = document.createElementNS(NS,'path');
-          trackPath.setAttribute('d', arcPath(CX,CY,R,A_START,A_END));
+          trackPath.setAttribute('d', gaugeArc(CX,CY,R,A_START,A_END));
           trackPath.setAttribute('fill','none');
           trackPath.setAttribute('stroke','#2A2519');
           trackPath.setAttribute('stroke-width','12');
@@ -734,15 +753,15 @@
           const tickLabels = [0,25,50,75,100,125,150];
           tickLabels.forEach((val,i)=>{
             const ang = A_START + (i/(tickLabels.length-1))*(A_END-A_START);
-            const p1 = polar(CX,CY,R+9, ang);
-            const p2 = polar(CX,CY,R+1, ang);
+            const p1 = gaugePoint(CX,CY,R+9, ang);
+            const p2 = gaugePoint(CX,CY,R+1, ang);
             const line = document.createElementNS(NS,'line');
             line.setAttribute('x1',p1.x); line.setAttribute('y1',p1.y);
             line.setAttribute('x2',p2.x); line.setAttribute('y2',p2.y);
             line.setAttribute('stroke','#5E5747'); line.setAttribute('stroke-width','1.5');
             gaugeSvg.appendChild(line);
         
-            const lp = polar(CX,CY,R+20, ang);
+            const lp = gaugePoint(CX,CY,R+20, ang);
             const text = document.createElementNS(NS,'text');
             text.setAttribute('x',lp.x); text.setAttribute('y',lp.y+3);
             text.setAttribute('text-anchor','middle');
@@ -753,19 +772,20 @@
             gaugeSvg.appendChild(text);
           });
         
-          // value arc
+          // Tick marks stay static so updating the score does not add avoidable SVG churn while this
+          // same page is trying to report DOM/render behavior.
           const valuePath = document.createElementNS(NS,'path');
           valuePath.setAttribute('fill','none');
           valuePath.setAttribute('stroke','#FF7A33');
           valuePath.setAttribute('stroke-width','12');
           valuePath.setAttribute('stroke-linecap','round');
           valuePath.style.transition = 'stroke-dasharray .8s cubic-bezier(.2,.8,.2,1)';
-          valuePath.setAttribute('d', arcPath(CX,CY,R,A_START,A_END));
+          valuePath.setAttribute('d', gaugeArc(CX,CY,R,A_START,A_END));
           const fullLen = Math.PI * R * (270/180);
           valuePath.setAttribute('stroke-dasharray', `0 ${fullLen}`);
           gaugeSvg.appendChild(valuePath);
         
-          function setGauge(score){
+          function swingNeedle(score){
             const pct = Math.max(0, Math.min(1, score/150));
             const len = fullLen * pct;
             valuePath.setAttribute('stroke-dasharray', `${len} ${fullLen}`);
@@ -775,7 +795,7 @@
             valuePath.setAttribute('stroke', color);
           }
 
-          function runCPU(){
+          function cpuBurn24(){
             const start = performance.now();
             let x = 0;
             const iterations = 6000000;
@@ -784,11 +804,11 @@
             }
             const elapsed = performance.now() - start;
             const opsPerSec = iterations / (elapsed/1000);
-            checksum += x % 97;
-            return { raw: opsPerSec, display: fmt(opsPerSec), score: (opsPerSec/45000000)*100 };
+            chkAccumulator += x % 97;
+            return { raw: opsPerSec, display: meterText(opsPerSec), score: (opsPerSec/45000000)*100 };
           }
         
-          function runMemory(){
+          function memSweep24(){
             const start = performance.now();
             const size = 5000000;
             const arr = new Float64Array(size);
@@ -798,11 +818,11 @@
             const elapsed = performance.now() - start;
             const bytes = size * 8 * 2;
             const mbPerSec = (bytes/1e6) / (elapsed/1000);
-            checksum += sum % 97;
-            return { raw: mbPerSec, display: fmt(mbPerSec), score: (mbPerSec/2500)*100 };
+            chkAccumulator += sum % 97;
+            return { raw: mbPerSec, display: meterText(mbPerSec), score: (mbPerSec/2500)*100 };
           }
         
-          function runSort(){
+          function sortDeck24(){
             const start = performance.now();
             const n = 400000;
             const arr = new Array(n);
@@ -810,11 +830,11 @@
             arr.sort((a,b)=>a-b);
             const elapsed = performance.now() - start;
             const elemPerSec = n / (elapsed/1000);
-            checksum += arr[0] * 1000 % 97;
-            return { raw: elemPerSec, display: fmt(elemPerSec), score: (elemPerSec/1500000)*100 };
+            chkAccumulator += arr[0] * 1000 % 97;
+            return { raw: elemPerSec, display: meterText(elemPerSec), score: (elemPerSec/1500000)*100 };
           }
         
-          function runDOM(){
+          function domRack24(){
             return new Promise(resolve=>{
               const start = performance.now();
               const container = document.getElementById('domSandbox');
@@ -831,12 +851,14 @@
               container.innerHTML = '';
               const elapsed = performance.now() - start;
               const opsPerSec = n / (elapsed/1000);
-              resolve({ raw: opsPerSec, display: fmt(opsPerSec), score: (opsPerSec/40000)*100 });
+              resolve({ raw: opsPerSec, display: meterText(opsPerSec), score: (opsPerSec/40000)*100 });
             });
           }
         
-          function runRender(){
-            return new Promise(resolve=>{
+          function gfxLoop24(){
+            return new Promise((resolve, reject)=>{
+              if (!ctx) { reject(new Error('2D canvas context unavailable')); return; }
+              if (document.hidden) { reject(new Error('tab hidden before GFX sample')); return; }
               scopeModeEl.textContent = 'RENDER';
               liveDot.classList.add('on'); liveText.textContent = 'ACTIVE';
               if (idleRaf) cancelAnimationFrame(idleRaf);
@@ -861,11 +883,18 @@
               }
         
               function frame(now){
+                if (document.hidden) {
+                  scopeModeEl.textContent = 'IDLE';
+                  liveDot.classList.remove('on'); liveText.textContent = 'STANDBY';
+                  idleScope();
+                  reject(new Error('tab lost focus during GFX sample'));
+                  return;
+                }
                 frames++;
                 const dt = now - last; last = now;
                 trace.push(1000/Math.max(dt,1));
                 if (trace.length > 140) trace.shift();
-                drawTrace(trace, 'rgba(255,122,51,0.85)');
+                plotScope(trace, 'rgba(255,122,51,0.85)');
                 stressFrame();
                 if (now - start < duration){
                   requestAnimationFrame(frame);
@@ -874,7 +903,7 @@
                   const fps = frames / (elapsed/1000);
                   scopeModeEl.textContent = 'IDLE';
                   liveDot.classList.remove('on'); liveText.textContent = 'STANDBY';
-                  drawIdle();
+                  idleScope();
                   resolve({ raw: fps, display: fps.toFixed(1), score: (fps/60)*100 });
                 }
               }
@@ -882,9 +911,9 @@
             });
           }
         
-          const RUNNERS = { cpu: runCPU, memory: runMemory, sort: runSort, dom: runDOM, render: runRender };
+          const DS24_RUN = { cpu: cpuBurn24, memory: memSweep24, sort: sortDeck24, dom: domRack24, render: gfxLoop24 };
 
-          function grade(score){
+          function ds24Grade(score){
             if (score >= 140) return 'S';
             if (score >= 110) return 'A';
             if (score >= 90)  return 'B';
@@ -892,20 +921,20 @@
             if (score >= 50)  return 'D';
             return 'F';
           }
-          function tierLabel(score){
+          function tierCopy24(score){
             if (score >= 120) return 'Elite tier — top-end desktop-class throughput.';
             if (score >= 80)  return 'High tier — comfortably above the baseline laptop.';
             if (score >= 45)  return 'Mid tier — in line with a typical modern laptop.';
             return 'Entry tier — below baseline; background load or throttling may be a factor.';
           }
         
-          function updateComposite(){
-            const scores = TESTS.map(t => results[t.id] ? results[t.id].score : 0);
-            const composite = scores.reduce((a,b)=>a+b,0) / TESTS.length;
+          function tallyRun24(){
+            const scores = DS24_CAL.map(probe => ds24Run[probe.id] ? ds24Run[probe.id].score : 0);
+            const composite = scores.reduce((a,b)=>a+b,0) / DS24_CAL.length;
             document.getElementById('gaugeScore').textContent = composite.toFixed(0);
-            document.getElementById('gaugeGrade').innerHTML = '<b>'+grade(composite)+'</b>';
-            setGauge(composite);
-            document.getElementById('compDesc').textContent = tierLabel(composite);
+            document.getElementById('gaugeGrade').innerHTML = '<b>'+ds24Grade(composite)+'</b>';
+            swingNeedle(composite);
+            document.getElementById('compDesc').textContent = tierCopy24(composite);
         
             const pct = Math.max(0, Math.min(1, composite/160)) * 100;
             document.getElementById('rulerFill').style.width = pct + '%';
@@ -916,55 +945,84 @@
           const runBtn = document.getElementById('runBtn');
           const runStatus = document.getElementById('runStatus');
         
-          async function runAll(){
+          async function fireDS24(){
             runBtn.disabled = true;
             runBtn.textContent = 'Running…';
-            runStatus.textContent = 'Test 1 of ' + TESTS.length;
-            results = {};
-            checksum = 0;
+            runStatus.textContent = 'Test 1 of ' + DS24_CAL.length;
+            ds24Run = {};
+            chkAccumulator = 0;
+            runBook.seq += 1;
+            runBook.startedAt = performance.now();
+            runBook.hiddenAtStart = document.hidden;
             logBody.innerHTML = '';
-            log('BOOT', 'Initializing diagnostic sequence.');
-        
-            for (let i=0; i<TESTS.length; i++){
-              const t = TESTS[i];
-              runStatus.textContent = `Test ${i+1} of ${TESTS.length} — ${t.name}`;
-              setCard(t.id, 'active');
-              setStatus(t.id, 'Running', 'running');
-              document.getElementById('readout-'+t.id).textContent = '···';
-        
-              await new Promise(r=>setTimeout(r, 60)); // let UI paint
-              const res = await RUNNERS[t.id]();
-              results[t.id] = res;
-        
-              document.getElementById('readout-'+t.id).innerHTML =
-                `${res.display}<span class="unit">${t.unit}</span>`;
-              document.getElementById('bar-'+t.id).style.width =
-                Math.max(4, Math.min(100, res.score)) + '%';
-              document.getElementById('score-'+t.id).textContent = res.score.toFixed(0) + ' pts';
-        
-              setStatus(t.id, 'Pass', 'pass');
-              setCard(t.id, 'done');
-              log(t.id.toUpperCase().padEnd(6), `${t.name} complete — <b>${res.display} ${t.unit}</b> (${res.score.toFixed(0)} pts)`);
-        
-              updateComposite();
-              updateOverview();
+            ledger('BOOT', `DS${DS24_REV} run ${String(runBook.seq).padStart(2,'0')} · ${CAL_CARD} · ${runBook.browser}.`);
+
+            // rAF is heavily throttled in background tabs. A hidden-tab render score looks like
+            // bad hardware, so Rev 2.4 refuses that run instead of filing a misleading result.
+            if (document.hidden) {
+              ledger('HOLD', 'Tab is not visible; render calibration would be invalid.');
+              runStatus.textContent = 'Bring this tab to the front, then run again.';
+              runBtn.disabled = false;
+              runBtn.textContent = 'Run Benchmark';
+              return;
             }
         
-            const composite = updateComposite();
-            updateOverview();
-            buildUpgradeSuggestions();
-            log('DONE', `Composite score <b>${composite.toFixed(0)}</b>, grade <b>${grade(composite)}</b>.`);
+            for (let i=0; i<DS24_CAL.length; i++){
+              const probe = DS24_CAL[i];
+              runStatus.textContent = `Test ${i+1} of ${DS24_CAL.length} — ${probe.name}`;
+              markProbeCard(probe.id, 'active');
+              stampProbeState(probe.id, 'Running', 'running');
+              document.getElementById('readout-'+probe.id).textContent = '···';
         
-            const totalTime = ((performance.now()-t0)/1000).toFixed(2);
+              // Keep one paint between the status change and the workload. Without it, CPU-01 can block
+              // the main thread before the operator ever sees the card switch to Running.
+              await new Promise(r=>setTimeout(r, 60));
+
+              try {
+                const reading = await DS24_RUN[probe.id]();
+                if (!reading || !Number.isFinite(reading.score)) throw new Error('invalid benchmark reading');
+
+                ds24Run[probe.id] = reading;
+                document.getElementById('readout-'+probe.id).innerHTML =
+                  `${reading.display}<span class="unit">${probe.unit}</span>`;
+                document.getElementById('bar-'+probe.id).style.width =
+                  Math.max(4, Math.min(100, reading.score)) + '%';
+                document.getElementById('score-'+probe.id).textContent = reading.score.toFixed(0) + ' pts';
+
+                stampProbeState(probe.id, 'Pass', 'pass');
+                markProbeCard(probe.id, 'done');
+                ledger(probe.id.toUpperCase().padEnd(6), `${probe.name} complete — <b>${reading.display} ${probe.unit}</b> (${reading.score.toFixed(0)} pts)`);
+              } catch (err) {
+                hostFacts.notes.push(`${probe.id}: ${err && err.message ? err.message : 'unknown failure'}`);
+                ds24Run[probe.id] = { raw:0, display:'ERR', score:0, failed:true };
+                document.getElementById('readout-'+probe.id).textContent = 'ERR';
+                document.getElementById('score-'+probe.id).textContent = '0 pts';
+                document.getElementById('bar-'+probe.id).style.width = '4%';
+                stampProbeState(probe.id, 'Error', 'running');
+                markProbeCard(probe.id, 'done');
+                ledger('FAULT ', `${probe.name} probe failed: <b>${err && err.message ? err.message : 'unknown error'}</b>`);
+              }
+
+              tallyRun24();
+              redrawHostCards();
+            }
+        
+            const composite = tallyRun24();
+            redrawHostCards();
+            writeFieldNotes();
+            ledger('DONE', `Run ${String(runBook.seq).padStart(2,'0')} closed at <b>${composite.toFixed(0)}</b> pts / grade <b>${ds24Grade(composite)}</b>.`);
+            if (hostFacts.notes.length) ledger('NOTE', `${hostFacts.notes.length} diagnostic warning(s) recorded this session.`);
+        
+            const totalTime = ((performance.now()-runBook.startedAt)/1000).toFixed(2);
             document.getElementById('footLeft').textContent = `Completed in ${totalTime}s · ${new Date().toLocaleTimeString()}`;
-            document.getElementById('footRight').textContent = 'CHK ' + Math.abs(checksum).toFixed(2);
+            document.getElementById('footRight').textContent = 'CHK ' + Math.abs(chkAccumulator).toFixed(2);
         
             runBtn.disabled = false;
             runBtn.textContent = 'Run Again';
             runStatus.textContent = 'Suite complete.';
           }
         
-          runBtn.addEventListener('click', runAll);
+          runBtn.addEventListener('click', fireDS24);
         
         })();
     </script>
