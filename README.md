@@ -125,7 +125,7 @@ The diagnostic log also records what happened during each run, making unusual re
 Clone the repository:
 
 ```bash
-git clone YOUR_REPOSITORY_URL
+git clone https://github.com/ic3-gov/benchmark
 ```
 
 Then open:
